@@ -24,7 +24,7 @@ def extract_year_month(release_date):
             
     return year, month
 
-def transform_data():
+def transform_data(last_run_time=None):
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     raw_dir = os.path.join(base_dir, "data", "raw")
     processed_dir = os.path.join(base_dir, "data", "processed")
@@ -86,7 +86,6 @@ def transform_data():
                 }
                 
         # Extract track attributes
-        # Fact table maps to primary artist (first in the list)
         primary_artist_id = None
         artists_on_track = track.get("artists", [])
         if artists_on_track:
@@ -117,7 +116,25 @@ def transform_data():
     df_albums = pd.DataFrame(list(albums_dict.values()))
     df_tracks = pd.DataFrame(tracks_list)
     
-    # 3. Perform Validation (Phase 3)
+    # 3. Incremental Loading Filter
+    if last_run_time is not None and not df_albums.empty:
+        # Convert release_date to datetime for comparison
+        df_albums['release_date_dt'] = pd.to_datetime(df_albums['release_date'], errors='coerce')
+        cutoff = pd.Timestamp(last_run_time).normalize()
+        
+        # Keep only albums released since last successful run
+        filtered_albums = df_albums[df_albums['release_date_dt'] >= cutoff]
+        
+        # If filtering results in empty dataset, we might want to log it
+        print(f"Incremental Filter applied. Albums before: {len(df_albums)}, after: {len(filtered_albums)}")
+        
+        df_albums = filtered_albums.drop(columns=['release_date_dt'])
+        
+        # Filter tracks to only include those belonging to the remaining albums
+        valid_album_ids = set(df_albums['album_id'])
+        df_tracks = df_tracks[df_tracks['album_id'].isin(valid_album_ids)]
+        
+    # 4. Perform Validation (Phase 3)
     validation_checks = {}
     
     # Artists validation
@@ -126,22 +143,22 @@ def transform_data():
     validation_checks["Artists Popularity Range"] = validate_ranges(df_artists, "popularity", 0, 100)
     
     # Albums validation
-    validation_checks["Albums Null IDs"] = check_nulls(df_albums, ["album_id", "album_name"])
-    validation_checks["Albums Duplicates"] = check_duplicates(df_albums, "album_id")
-    validation_checks["Albums Track Count Range"] = validate_ranges(df_albums, "total_tracks", 0, 1000)
+    validation_checks["Albums Null IDs"] = check_nulls(df_albums, ["album_id", "album_name"]) if not df_albums.empty else (pd.DataFrame(), "")
+    validation_checks["Albums Duplicates"] = check_duplicates(df_albums, "album_id") if not df_albums.empty else (pd.DataFrame(), "")
+    validation_checks["Albums Track Count Range"] = validate_ranges(df_albums, "total_tracks", 0, 1000) if not df_albums.empty else (pd.DataFrame(), "")
     
     # Tracks validation
-    validation_checks["Tracks Null IDs"] = check_nulls(df_tracks, ["track_id", "track_name", "artist_id", "album_id"])
-    validation_checks["Tracks Duplicates"] = check_duplicates(df_tracks, "track_id")
-    validation_checks["Tracks Popularity Range"] = validate_ranges(df_tracks, "popularity", 0, 100)
-    validation_checks["Tracks Duration Range"] = validate_ranges(df_tracks, "duration_minutes", 0, 180) # max 3 hours track
+    validation_checks["Tracks Null IDs"] = check_nulls(df_tracks, ["track_id", "track_name", "artist_id", "album_id"]) if not df_tracks.empty else (pd.DataFrame(), "")
+    validation_checks["Tracks Duplicates"] = check_duplicates(df_tracks, "track_id") if not df_tracks.empty else (pd.DataFrame(), "")
+    validation_checks["Tracks Popularity Range"] = validate_ranges(df_tracks, "popularity", 0, 100) if not df_tracks.empty else (pd.DataFrame(), "")
+    validation_checks["Tracks Duration Range"] = validate_ranges(df_tracks, "duration_minutes", 0, 180) if not df_tracks.empty else (pd.DataFrame(), "")
     
     # Write report
     report_path = os.path.join(processed_dir, "validation_report.txt")
     validation_passed = generate_report(validation_checks, report_path)
     print(f"Data Validation Completed. Status: {'PASSED' if validation_passed else 'FAILED'}. Report saved to: {report_path}")
     
-    # 4. Save Processed Data
+    # 5. Save Processed Data
     if not os.path.exists(processed_dir):
         os.makedirs(processed_dir)
         

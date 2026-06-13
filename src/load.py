@@ -129,5 +129,25 @@ def load_data():
     print(f"Data loading completed. Total tracks loaded/updated: {records_loaded}")
     return records_loaded
 
+def get_last_successful_run_time():
+    """Queries etl_metadata to find the start_time of the last successful run."""
+    try:
+        init_db()
+        stmt = text("""
+            SELECT start_time 
+            FROM etl_metadata 
+            WHERE status = 'SUCCESS' 
+            ORDER BY start_time DESC 
+            LIMIT 1;
+        """)
+        with engine.connect() as conn:
+            result = conn.execute(stmt).fetchone()
+            if result:
+                return result[0]
+    except Exception as e:
+        print(f"Metadata table check failed: {e}. Defaulting to None.")
+    return None
+
 if __name__ == "__main__":
     load_data()
+

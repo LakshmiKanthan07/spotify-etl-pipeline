@@ -5,7 +5,7 @@ import datetime
 from sqlalchemy import text
 from extract import search_tracks, get_artists, save_json
 from transform import transform_data
-from load import load_data, engine
+from load import load_data, engine, get_last_successful_run_time
 
 # 1. Setup Logging (Phase 10)
 base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -56,9 +56,13 @@ def main():
     records_loaded = 0
     
     try:
+        # --- Check Incremental Metadata ---
+        last_run_time = get_last_successful_run_time()
+        logger.info(f"Last successful pipeline run time: {last_run_time}")
+        
         # --- PHASE 2: Data Extraction ---
-        logger.info(f"Step 1: Extracting tracks metadata for query '{query}'...")
-        tracks_data = search_tracks(query, 10)
+        logger.info(f"Step 1: Extracting tracks metadata for query '{query}' (limit: 50)...")
+        tracks_data = search_tracks(query, 50)
         
         artist_ids = set()
         if "tracks" in tracks_data and "items" in tracks_data["tracks"]:
@@ -85,7 +89,7 @@ def main():
         
         # --- PHASES 3 & 4: Validation & Transformation ---
         logger.info("Step 2: Starting Validation and Transformation Layer...")
-        validation_passed = transform_data()
+        validation_passed = transform_data(last_run_time)
         
         if not validation_passed:
             logger.warning("Data validation issues were found. Check logs/validation_report.txt for details.")
