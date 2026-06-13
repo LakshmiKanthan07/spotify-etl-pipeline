@@ -9,30 +9,48 @@ The system follows modern data engineering practices including modular ETL archi
 ```text
 Spotify API
     ↓
-Authentication Layer
+Authentication Layer (auth.py)
     ↓
-Extraction Layer -> Raw JSON Storage (Data Lake)
+Extraction Layer (extract.py) -> Raw JSON Storage (data/raw/)
     ↓
-Validation Layer
+Validation Layer (validate.py)
     ↓
-Transformation Layer -> Processed Data
+Transformation Layer (transform.py) -> Processed CSV Data (data/processed/)
     ↓
-PostgreSQL Data Warehouse
+PostgreSQL Data Warehouse (load.py + schema.sql)
     ↓
-SQL Analytics
+SQL Analytics (analytics.sql)
     ↓
-Power BI Dashboard
+Airflow Orchestration (spotify_dag.py)
 ```
 
-## Installation Guide
-1. Clone the repository.
-2. Ensure you have Python installed.
-3. Create a virtual environment and install the required dependencies:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows use: venv\Scripts\activate
-   pip install -r requirements.txt
-   ```
+## Folder Structure
+```text
+spotify-etl-pipeline/
+├── data/
+│   ├── raw/                 # Raw JSON responses from API
+│   └── processed/           # Transformed CSV files & validation reports
+├── src/
+│   ├── auth.py              # OAuth Access Token Management
+│   ├── extract.py           # Track & Artist extraction logic
+│   ├── validate.py          # Data quality checks & report generation
+│   ├── transform.py         # Tabular data parser & feature engineering
+│   ├── load.py              # SQLAlchemy DB Loader with Upserts
+│   └── main.py              # Main pipeline orchestrator & logging
+├── sql/
+│   ├── schema.sql           # PostgreSQL Star Schema definition
+│   └── analytics.sql        # Standard analytical queries
+├── tests/
+│   ├── conftest.py          # Pytest setup configuration
+│   └── test_etl.py          # Pytest unit tests for ETL components
+├── docker/
+│   ├── Dockerfile           # Python application build
+│   └── docker-compose.yml   # Multi-container service definitions
+├── airflow/
+│   └── dags/
+│       └── spotify_dag.py   # Airflow Dag Orchestrator
+└── logs/                    # Local file logs
+```
 
 ## Environment Setup
 Create a `.env` file in the root directory and add your Spotify API credentials:
@@ -42,29 +60,40 @@ SPOTIFY_CLIENT_SECRET=your_client_secret_here
 ```
 
 ## How to Run
-Currently, the extraction layer is in progress. To test the Spotify API connection:
+
+### Option 1: Docker Compose (Recommended)
+Spins up PostgreSQL, Airflow Webserver, Airflow Scheduler, and builds the ETL container.
+1. Run:
+   ```bash
+   docker compose -f docker/docker-compose.yml up -d
+   ```
+2. Access the Airflow UI at `http://localhost:8080` (default credentials: `admin` / `admin`).
+3. You can access the PostgreSQL Database mapped to `localhost:5432` with user `postgres` / password `postgres` / database `spotify_db`.
+
+### Option 2: Running Locally
+1. Run local PostgreSQL database with credentials:
+   - Database name: `spotify_db`
+   - User/Password: `postgres`/`postgres`
+2. Run the main ETL script:
+   ```bash
+   python src/main.py
+   ```
+3. Check the execution logs inside `logs/etl.log` and the validation report in `data/processed/validation_report.txt`.
+
+## How to Test
+Execute unit tests using pytest:
 ```bash
-python src/test_spotify.py
-python src/main.py
+python -m pytest tests/test_etl.py
 ```
-*(Full instructions will be added once Airflow and Docker are fully integrated)*
 
-## Database Schema (Planned)
+## Database Schema (Star Schema)
 
-### Star Schema Design
+### Dimension Tables
+* **`dim_artist`**: `artist_id` (PK), `artist_name`, `genres`, `followers`, `popularity`
+* **`dim_album`**: `album_id` (PK), `album_name`, `release_date`, `release_year`, `release_month`, `release_decade`, `album_type`, `total_tracks`
 
-**Dimension Tables:**
-- `dim_artist`: `artist_id`, `artist_name`, `genres`, `followers`, `popularity`
-- `dim_album`: `album_id`, `album_name`, `release_date`, `album_type`, `total_tracks`
+### Fact Table
+* **`fact_tracks`**: `track_id` (PK), `track_name`, `artist_id` (FK), `album_id` (FK), `duration_minutes`, `popularity`, `explicit`
 
-**Fact Table:**
-- `fact_tracks`: `track_id`, `track_name`, `artist_id`, `album_id`, `duration_minutes`, `popularity`, `explicit`
-
-## Dashboard Screenshots
-*(Screenshots of the Power BI dashboard will be added here once Phase 8 is completed)*
-
-## Future Enhancements
-- Implement Incremental Loading
-- Add Data Quality Metrics
-- Add CI/CD using GitHub Actions
-- Add AWS Deployment (S3 -> Airflow -> RDS PostgreSQL -> Power BI)
+### Metadata Table
+* **`etl_metadata`**: `pipeline_run_id` (PK), `start_time`, `end_time`, `records_extracted`, `records_loaded`, `status`
